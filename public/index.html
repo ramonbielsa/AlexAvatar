@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agente Alex</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div id="app-container">
+        <div id="avatar-container"> <video id="avatar-video" autoplay playsinline muted></video>
+            <div id="status">Haz clic para iniciar</div>
+        </div>
+
+        <div id="chat-container">
+            <div id="chat-log">
+                 <div class="message bot-message">Hola, soy Álex, el agente de GrantsWin. ¿En qué puedo ayudarte?</div>
+            </div>
+            <div id="input-container">
+                <input type="text" id="chat-input" placeholder="Escribe tu mensaje...">
+                <button id="mic-btn">🎤</button>
+                <button id="send-btn">➤</button>
+            </div>
+        </div>
+    </div>
+    <script src="/script.js"></script>
+</body>
+</html>
