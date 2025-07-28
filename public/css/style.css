@@ -180,3 +180,31 @@ body {
     50% { opacity: 1; }
     100% { opacity: 0.3; }
 }
+
+/*Botón Compartir pantalla*/
+#share-screen-btn {
+    padding: 10px;
+    min-width: 48px;
+    height: 48px;
+    background-color: #6c757d; /* Mismo color que el micro */
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.5rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: background-color 0.2s;
+    margin-right: 8px; /* Espacio con el botón de enviar */
+}
+
+#share-screen-btn:hover {
+    background-color: #5a6268;
+}
+
+#share-screen-btn.active {
+    background-color: #198754; /* Verde para indicar que está activo */
+    border: 2px solid white;
+    box-shadow: 0 0 10px rgba(25, 135, 84, 0.7);
+}

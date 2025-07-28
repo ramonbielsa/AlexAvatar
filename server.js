@@ -6,6 +6,7 @@ import fetch from 'node-fetch';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { AbortController } from 'node-abort-controller'; // Importar AbortController para controla el tiempo que espera al servidor D-ID
 
 dotenv.config();
 
@@ -13,7 +14,12 @@ dotenv.config();
 const app = express();
 const port = 3000;
 app.use(cors());
-app.use(express.json());
+
+// Reemplazamos esta linea con las siguientes, para aumentar límite
+//app.use(express.json());
+ //Aumentamos el límite de express para aceptar datos
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // --- SERVIR ARCHIVOS ESTÁTICOS ---
 const __filename = fileURLToPath(import.meta.url);
@@ -22,7 +28,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // --- CONFIGURACIÓN DE APIS ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); //gemini-1.5-pro-latest
 const DID_API_URL = 'https://api.d-id.com';
 
 // --- LÓGICA DE AUTENTICACIÓN (BASADO EN GITHUB DEMO - SIN CODIFICAR) Repositorio de ejemplo de D-ID---
@@ -47,31 +53,54 @@ const knowledgeBase = fileToGenerativePart(pdfPath, "application/pdf");
 console.log('Base de conocimiento (PDF) cargada en memoria.');
 
 
+// Función para mejorar el tiempo de espera al servidor D-ID
+async function fetchWithTimeout(url, options, timeout = 30000) { // Timeout de 30 segundos
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+        return response;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 // --- RUTAS DE LA API ---
 
 // 1. CHAT CON GEMINI
 app.post('/api/chat', async (req, res) => {
     try {
-        const { message, history } = req.body;
-        const prompt = [
-            `
+        // Ahora recibimos un historial y un objeto de mensaje que puede contener imágenes
+        const { history, message } = req.body;
+
+        const system_prompt = `
             **Rol y Personalidad:** Tu nombre es Alex y eres un agente de soporte de la aplicación GrantsWin. Tu tono debe ser siempre amable, directo y muy breve.
+
+            **Tarea Principal:** Tu tarea es responder a las preguntas de los usuarios sobre el funcionamiento de la aplicación GrantsWin.
+            
+            **Capacidades:**
+            1.  **Conocimiento Base:** Puedes responder preguntas basándote en el contenido del documento PDF que conoces.
+            2.  **Guía Visual:** Si el usuario te envía una imagen de la pantalla, tu tarea principal es analizar esa imagen y guiarle. Describe brevemente el botón o elemento en el que debe hacer clic. Sé muy específico. Por ejemplo: "Para encontrar convocatorias, haz clic en el botón verde que dice 'I want calls'".
         
-            **Tarea Principal:** Tu única tarea es responder a las preguntas de los usuarios sobre el funcionamiento de la aplicación GrantsWin. Para hacerlo, debes basar tus respuestas única y exclusivamente en el contenido del documento PDF adjunto. No inventes información.
-        
-            **Regla Crucial:** Nunca menciones que estás basándote en un documento PDF. Actúa como si conocieras la aplicación de forma natural. Si te preguntan sobre ti (quién eres, etc.), simplemente responde "Soy Alex, un agente de soporte de GrantsWin." y vuelve a centrarte en cómo puedes ayudar con la aplicación.
-            `,
-            knowledgeBase,
-            message
-        ];
+            **Reglas Cruciales:**
+            -   Nunca menciones que estás basándote en un documento PDF o en una imagen. Actúa como si lo supieras todo de forma natural.
+            -   Si no puedes identificar la acción en la imagen, pide amablemente que te muestre otra parte de la aplicación.
+            -   Si te preguntan sobre ti (quién eres, etc.), simplemente responde "Soy Alex, un agente de soporte de GrantsWin." y vuelve a centrarte en cómo puedes ayudar con la aplicación.
+            `;
+
+        const final_prompt = [system_prompt, knowledgeBase, ...message.parts];
 
         // Configura las cabeceras para una respuesta de streaming
-        res.setHeader('Content-Type', 'text/plain');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.setHeader('Transfer-Encoding', 'chunked');
 
         // Inicia el chat y genera el contenido como un stream
         const chat = geminiModel.startChat({ history: history || [] });
-        const result = await chat.sendMessageStream(prompt);
+        const result = await chat.sendMessageStream(final_prompt);
 
         // Envía cada trozo de texto al cliente en cuanto se recibe
         for await (const chunk of result.stream) {
@@ -83,7 +112,6 @@ app.post('/api/chat', async (req, res) => {
 
     } catch (error) {
         console.error('Error en el chat con Gemini (stream):', error);
-        // No podemos enviar un status 500 si ya empezamos a escribir la respuesta
         res.end('Error: No se pudo procesar la respuesta.');
     }
 });
@@ -91,13 +119,13 @@ app.post('/api/chat', async (req, res) => {
 // 2. RUTAS DE D-ID
 app.post('/api/d-id/create-stream', async (req, res) => {
     try {
-        const response = await fetch(`${DID_API_URL}/talks/streams`, {
+        const response = await fetchWithTimeout(`${DID_API_URL}/talks/streams`, {
             method: 'POST',
             // Usamos la clave en texto plano directamente
             headers: { 'Authorization': `Basic ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ source_url: "https://create-images-results.d-id.com/DefaultPresenters/Gordon_m/v2_with_background_image.jpg",
                 config: {
-                    stich: true,
+                    stitch: true,
                 }
              }),
         });
@@ -131,7 +159,7 @@ app.post('/api/d-id/talk-stream', async (req, res) => {
             };
         }
 
-        const response = await fetch(`${DID_API_URL}/talks/streams/${stream_id}`, {
+        const response = await fetchWithTimeout(`${DID_API_URL}/talks/streams/${stream_id}`, {
             method: 'POST',
             headers: { 'Authorization': `Basic ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -156,7 +184,7 @@ app.post('/api/d-id/talk-stream', async (req, res) => {
 app.post('/api/d-id/start-stream', async (req, res) => {
     const { stream_id, session_id, answer } = req.body;
     try {
-        const response = await fetch(`${DID_API_URL}/talks/streams/${stream_id}/sdp`, {
+        const response = await fetchWithTimeout(`${DID_API_URL}/talks/streams/${stream_id}/sdp`, {
             method: 'POST',
             headers: { 'Authorization': `Basic ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ answer: answer, session_id: session_id }),
@@ -173,7 +201,7 @@ app.post('/api/d-id/start-stream', async (req, res) => {
 app.post('/api/d-id/close-stream', async (req, res) => {
     const { stream_id, session_id } = req.body;
     try {
-        await fetch(`${DID_API_URL}/talks/streams/${stream_id}`, {
+        await fetchWithTimeout(`${DID_API_URL}/talks/streams/${stream_id}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Basic ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ session_id: session_id }),
